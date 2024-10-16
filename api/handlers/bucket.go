@@ -1,184 +1,133 @@
 package handlers
 
 import (
-	"encoding/xml"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/ab-dauletkhan/triple-s/api/core"
-	"github.com/ab-dauletkhan/triple-s/api/types"
 	"github.com/ab-dauletkhan/triple-s/api/util"
 )
 
-func CreateBucket(w http.ResponseWriter, r *http.Request) {
-	log.Println("Create bucket called")
+var (
+	ErrBucketNotFound      = fmt.Errorf("bucket not found")
+	ErrBucketAlreadyExists = fmt.Errorf("bucket already exists")
+	ErrBucketNotEmpty      = fmt.Errorf("bucket is not empty")
+)
 
+func CreateBucket(w http.ResponseWriter, r *http.Request) {
 	bucketName := strings.TrimPrefix(r.URL.Path, "/")
 
-	// 1. Validate the bucket name
-	err := util.ValidateBucketName(bucketName)
+	newBucket, err := createBucket(bucketName)
 	if err != nil {
-		log.Printf("Invalid bucket name: %s, error: %s\n", bucketName, err.Error())
-		XMLErrResponse(w, http.StatusBadRequest, fmt.Sprintf("Invalid bucket name: %s", err.Error()))
+		log.Printf("Error creating bucket %s: %v\n", bucketName, err)
+		handleError(w, err)
 		return
 	}
 
-	// 2. Read the buckets.xml file
-	bucketsData, err := ReadBucketsFile()
-	if err != nil {
-		log.Println(err)
-		XMLErrResponse(w, http.StatusInternalServerError, "Internal Server Error")
-		return
-	}
-
-	// 3. Check if the bucket already exists in the buckets.xml file
-	for _, bucket := range bucketsData.Buckets {
-		if bucket.Name == bucketName {
-			log.Printf("Bucket %s already exists\n", bucketName)
-			XMLErrResponse(w, http.StatusConflict, "Bucket already exists")
-			return
-		}
-	}
-
-	// 4. Create the new bucket entry
-	newBucket := types.Bucket{
-		Name:       bucketName,
-		CreatedAt:  time.Now(),
-		ModifiedAt: time.Now(),
-		Status:     "Active",
-	}
-	bucketsData.Buckets = append(bucketsData.Buckets, newBucket)
-
-	// 5. Write the updated buckets.xml file
-	err = WriteBucketsFile(bucketsData)
-	if err != nil {
-		log.Println(err)
-		XMLErrResponse(w, http.StatusInternalServerError, "Internal Server Error")
-		return
-	}
-
-	// 6. Create a directory for the new bucket (if necessary)
-	bucketDirPath := core.Dir + "/" + bucketName
-	if _, err := os.Stat(bucketDirPath); os.IsNotExist(err) {
-		err = os.Mkdir(bucketDirPath, 0o755)
-		if err != nil {
-			log.Printf("error creating bucket directory %s: %s\n", bucketDirPath, err.Error())
-			XMLErrResponse(w, http.StatusInternalServerError, "Internal Server Error")
-			return
-		}
-	}
-
-	// 7. Create an objects.xml file for the new bucket
-	err = util.InitObjectFile(bucketName)
-	if err != nil {
-		log.Printf("error creating objects.xml for bucket %s: %s\n", bucketName, err.Error())
-		XMLErrResponse(w, http.StatusInternalServerError, "Internal Server Error")
-		return
-	}
-
-	// 8. Respond with success
 	log.Printf("Bucket %s created successfully", bucketName)
-	w.Header().Set("Content-Type", "application/xml")
-	w.WriteHeader(http.StatusOK)
 	XMLResponse(w, http.StatusOK, newBucket)
 }
 
-func ListBuckets(w http.ResponseWriter, r *http.Request) {
-	log.Println("List buckets called")
+func createBucket(bucketName string) (core.Bucket, error) {
+	if err := util.ValidateBucketName(bucketName); err != nil {
+		return core.Bucket{}, fmt.Errorf("invalid bucket name: %w", err)
+	}
 
-	// 1. Read the buckets.xml file
 	bucketsData, err := ReadBucketsFile()
 	if err != nil {
-		log.Println(err)
-		XMLErrResponse(w, http.StatusInternalServerError, "Internal Server Error")
-		return
+		return core.Bucket{}, fmt.Errorf("error reading buckets file: %w", err)
 	}
 
-	// 2. Marshal the buckets data to XML
-	bucketsXML, err := xml.MarshalIndent(bucketsData, "", "  ")
+	if findBucketIndex(bucketsData.List, bucketName) != -1 {
+		return core.Bucket{}, ErrBucketAlreadyExists
+	}
+
+	newBucket := core.Bucket{
+		Name:         bucketName,
+		Status:       "Active",
+		CreationDate: time.Now().Format(time.RFC3339Nano),
+		LastUpdated:  time.Now().Format(time.RFC3339Nano),
+	}
+	bucketsData.List = append(bucketsData.List, newBucket)
+
+	if err := WriteBucketsFile(bucketsData); err != nil {
+		return core.Bucket{}, fmt.Errorf("error writing buckets file: %w", err)
+	}
+
+	if err := createBucketDirectory(bucketName); err != nil {
+		return core.Bucket{}, err
+	}
+
+	if err := util.InitObjectFile(bucketName); err != nil {
+		return core.Bucket{}, fmt.Errorf("error initializing object file: %w", err)
+	}
+
+	return newBucket, nil
+}
+
+func ListBuckets(w http.ResponseWriter, r *http.Request) {
+	bucketsData, err := listBuckets()
 	if err != nil {
-		log.Printf("error marshaling XML: %s\n", err.Error())
-		XMLErrResponse(w, http.StatusInternalServerError, "Internal Server Error")
+		log.Printf("Error listing buckets: %v\n", err)
+		handleError(w, err)
 		return
 	}
 
-	log.Println("Responded with\n", string(bucketsXML))
-	// Set the content type and write the response
-	w.Header().Set("Content-Type", "application/xml")
-	w.WriteHeader(http.StatusOK)
-	w.Write([]byte(xml.Header))
-	w.Write(bucketsXML)
+	log.Println("Buckets listed successfully")
+	XMLResponse(w, http.StatusOK, bucketsData)
+}
+
+func listBuckets() (core.Buckets, error) {
+	bucketsData, err := ReadBucketsFile()
+	if err != nil {
+		return core.Buckets{}, fmt.Errorf("error reading buckets file: %w", err)
+	}
+	return bucketsData, nil
 }
 
 func DeleteBucket(w http.ResponseWriter, r *http.Request) {
-	// TODO: Order of the delete is confusing, what happens if some step fails, how to properly handle them
-	// 1. Get the bucket name from the URL
 	bucketName := strings.TrimPrefix(r.URL.Path, "/")
 
-	// 2. Read the buckets.xml file
-	bucketsData, err := ReadBucketsFile()
-	if err != nil {
-		log.Println(err)
-		XMLErrResponse(w, http.StatusInternalServerError, "Internal Server Error")
+	if err := deleteBucket(bucketName); err != nil {
+		log.Printf("Error deleting bucket %s: %v\n", bucketName, err)
+		handleError(w, err)
 		return
 	}
 
-	// 3. Check if the bucket exists in the buckets.xml file
-	bucketIndex := -1
-	for i, bucket := range bucketsData.Buckets {
-		if bucket.Name == bucketName {
-			bucketIndex = i
-			break
-		}
-	}
-
-	if bucketIndex == -1 {
-		log.Printf("Bucket %s not found\n", bucketName)
-		XMLErrResponse(w, http.StatusNotFound, "Bucket not found")
-		return
-	}
-
-	// 4. Check if the bucket is empty
-	objectsData, err := ReadObjectsFile(bucketName)
-	if err != nil {
-		log.Println(err)
-		XMLErrResponse(w, http.StatusInternalServerError, "Internal Server Error")
-		return
-	}
-
-	if len(objectsData.Objects) > 0 {
-		log.Printf("Bucket %s is not empty\n", bucketName)
-		XMLErrResponse(w, http.StatusConflict, "Bucket is not empty")
-		return
-	}
-
-	// 5. Delete the bucket entry from the buckets
-	bucketsData.Buckets[bucketIndex] = bucketsData.Buckets[len(bucketsData.Buckets)-1]
-	bucketsData.Buckets = bucketsData.Buckets[:len(bucketsData.Buckets)-1]
-
-	// 6. Write the updated buckets.xml file
-	err = WriteBucketsFile(bucketsData)
-	if err != nil {
-		log.Println(err)
-		XMLErrResponse(w, http.StatusInternalServerError, "Internal Server Error")
-		return
-	}
-
-	// 7. Delete the bucket directory
-	bucketDirPath := core.Dir + "/" + bucketName
-	err = os.RemoveAll(bucketDirPath)
-	if err != nil {
-		log.Printf("error deleting bucket directory %s: %s\n", bucketDirPath, err.Error())
-		XMLErrResponse(w, http.StatusInternalServerError, "Internal Server Error")
-		return
-	}
-
-	// 8. Respond with success
 	log.Printf("Bucket %s deleted successfully", bucketName)
 	w.WriteHeader(http.StatusNoContent)
-	w.Write([]byte(fmt.Sprintf("Bucket '%s' deleted successfully", bucketName)))
+}
+
+func deleteBucket(bucketName string) error {
+	bucketsData, err := ReadBucketsFile()
+	if err != nil {
+		return fmt.Errorf("error reading buckets file: %w", err)
+	}
+
+	bucketIndex := findBucketIndex(bucketsData.List, bucketName)
+	if bucketIndex == -1 {
+		return ErrBucketNotFound
+	}
+
+	if err := checkBucketEmpty(bucketName); err != nil {
+		return err
+	}
+
+	bucketsData.List = removeBucket(bucketsData.List, bucketIndex)
+
+	if err := WriteBucketsFile(bucketsData); err != nil {
+		return fmt.Errorf("error writing buckets file: %w", err)
+	}
+
+	bucketDirPath := filepath.Join(core.Dir, bucketName)
+	if err := os.RemoveAll(bucketDirPath); err != nil {
+		return fmt.Errorf("error deleting bucket directory %s: %w", bucketDirPath, err)
+	}
+
+	return nil
 }

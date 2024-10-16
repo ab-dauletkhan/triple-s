@@ -1,31 +1,32 @@
 package util
 
 import (
+	"log"
 	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/ab-dauletkhan/triple-s/api/core"
 )
 
-func InitDir() error {
-	err := os.MkdirAll(core.Dir, 0o755)
+func createFileWithDefaultContent(filePath string, header []string) error {
+	f, err := os.OpenFile(filePath, os.O_CREATE|os.O_RDWR, core.FilePerm)
 	if err != nil {
-		return err
-	}
-
-	f, err := os.OpenFile(core.Dir+"/buckets.xml", os.O_CREATE|os.O_RDWR, 0o766)
-	if err != nil {
+		log.Println(err)
 		return err
 	}
 	defer f.Close()
 
-	fs, err := f.Stat()
+	fileStat, err := f.Stat()
 	if err != nil {
+		log.Println(err)
 		return err
 	}
 
-	if fs.Size() == 0 {
-		_, err := f.WriteString("<Buckets></Buckets>")
+	if fileStat.Size() == 0 {
+		_, err := f.WriteString(strings.Join(header, ",") + "\n")
 		if err != nil {
+			log.Println(err)
 			return err
 		}
 	}
@@ -33,29 +34,20 @@ func InitDir() error {
 	return nil
 }
 
+func InitDir() error {
+	err := os.MkdirAll(core.Dir, core.DirPerm)
+	if err != nil {
+		return err
+	}
+
+	return createFileWithDefaultContent(filepath.Join(core.Dir, core.BucketsFile), core.BucketsCSVHeader)
+}
+
 func InitObjectFile(bucketName string) error {
-	err := os.MkdirAll(core.Dir+"/"+bucketName, 0o755)
+	err := os.MkdirAll(filepath.Join(core.Dir, bucketName), core.DirPerm)
 	if err != nil {
 		return err
 	}
 
-	f, err := os.OpenFile(core.Dir+"/"+bucketName+"/objects.xml", os.O_CREATE|os.O_RDWR, 0o766)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-
-	fs, err := f.Stat()
-	if err != nil {
-		return err
-	}
-
-	if fs.Size() == 0 {
-		_, err := f.WriteString("<Objects></Objects>")
-		if err != nil {
-			return err
-		}
-	}
-
-	return nil
+	return createFileWithDefaultContent(filepath.Join(core.Dir, bucketName, core.ObjectsFile), core.ObjectsCSVHeader)
 }

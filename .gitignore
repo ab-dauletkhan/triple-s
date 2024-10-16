@@ -26,3 +26,4 @@ go.work.sum
 
 ./s3
 ./triple-s
+./data
