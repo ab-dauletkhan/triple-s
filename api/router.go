@@ -18,6 +18,7 @@ func Routes() *http.ServeMux {
 	mux.HandleFunc("PUT /{BucketName}/{ObjectKey}", handlers.CreateObject)
 	mux.HandleFunc("GET /{BucketName}/{ObjectKey}", handlers.GetObject)
 	mux.HandleFunc("DELETE /{BucketName}/{ObjectKey}", handlers.DeleteObject)
+	mux.HandleFunc("GET /{BucketName}", handlers.ListObjects)
 
 	return mux
 }

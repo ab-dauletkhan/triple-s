@@ -25,26 +25,26 @@ func CreateBucket(w http.ResponseWriter, r *http.Request) {
 	newBucket, err := createBucket(bucketName)
 	if err != nil {
 		log.Printf("Error creating bucket %s: %v\n", bucketName, err)
-		handleError(w, err)
+		HandleError(w, err)
 		return
 	}
 
 	log.Printf("Bucket %s created successfully", bucketName)
-	XMLResponse(w, http.StatusOK, newBucket)
+	XMLResponse(w, http.StatusOK, *newBucket)
 }
 
-func createBucket(bucketName string) (core.Bucket, error) {
+func createBucket(bucketName string) (*core.Bucket, error) {
 	if err := util.ValidateBucketName(bucketName); err != nil {
-		return core.Bucket{}, fmt.Errorf("invalid bucket name: %w", err)
+		return nil, fmt.Errorf("invalid bucket name: %w", err)
 	}
 
 	bucketsData, err := ReadBucketsFile()
 	if err != nil {
-		return core.Bucket{}, fmt.Errorf("error reading buckets file: %w", err)
+		return nil, fmt.Errorf("error reading buckets file: %w", err)
 	}
 
-	if findBucketIndex(bucketsData.List, bucketName) != -1 {
-		return core.Bucket{}, ErrBucketAlreadyExists
+	if FindBucketIndex(bucketsData.List, bucketName) != -1 {
+		return nil, ErrBucketAlreadyExists
 	}
 
 	newBucket := core.Bucket{
@@ -56,25 +56,25 @@ func createBucket(bucketName string) (core.Bucket, error) {
 	bucketsData.List = append(bucketsData.List, newBucket)
 
 	if err := WriteBucketsFile(bucketsData); err != nil {
-		return core.Bucket{}, fmt.Errorf("error writing buckets file: %w", err)
+		return nil, fmt.Errorf("error writing buckets file: %w", err)
 	}
 
-	if err := createBucketDirectory(bucketName); err != nil {
-		return core.Bucket{}, err
+	if err := CreateBucketDirectory(bucketName); err != nil {
+		return nil, err
 	}
 
 	if err := util.InitObjectFile(bucketName); err != nil {
-		return core.Bucket{}, fmt.Errorf("error initializing object file: %w", err)
+		return nil, fmt.Errorf("error initializing object file: %w", err)
 	}
 
-	return newBucket, nil
+	return &newBucket, nil
 }
 
 func ListBuckets(w http.ResponseWriter, r *http.Request) {
-	bucketsData, err := listBuckets()
+	bucketsData, err := ReadBucketsFile()
 	if err != nil {
-		log.Printf("Error listing buckets: %v\n", err)
-		handleError(w, err)
+		log.Printf("error reading buckets file: %s", err)
+		HandleError(w, err)
 		return
 	}
 
@@ -82,20 +82,12 @@ func ListBuckets(w http.ResponseWriter, r *http.Request) {
 	XMLResponse(w, http.StatusOK, bucketsData)
 }
 
-func listBuckets() (core.Buckets, error) {
-	bucketsData, err := ReadBucketsFile()
-	if err != nil {
-		return core.Buckets{}, fmt.Errorf("error reading buckets file: %w", err)
-	}
-	return bucketsData, nil
-}
-
 func DeleteBucket(w http.ResponseWriter, r *http.Request) {
 	bucketName := strings.TrimPrefix(r.URL.Path, "/")
 
 	if err := deleteBucket(bucketName); err != nil {
 		log.Printf("Error deleting bucket %s: %v\n", bucketName, err)
-		handleError(w, err)
+		HandleError(w, err)
 		return
 	}
 
@@ -109,16 +101,16 @@ func deleteBucket(bucketName string) error {
 		return fmt.Errorf("error reading buckets file: %w", err)
 	}
 
-	bucketIndex := findBucketIndex(bucketsData.List, bucketName)
+	bucketIndex := FindBucketIndex(bucketsData.List, bucketName)
 	if bucketIndex == -1 {
 		return ErrBucketNotFound
 	}
 
-	if err := checkBucketEmpty(bucketName); err != nil {
+	if err := CheckBucketEmpty(bucketName); err != nil {
 		return err
 	}
 
-	bucketsData.List = removeBucket(bucketsData.List, bucketIndex)
+	bucketsData.List = RemoveBucket(bucketsData.List, bucketIndex)
 
 	if err := WriteBucketsFile(bucketsData); err != nil {
 		return fmt.Errorf("error writing buckets file: %w", err)
