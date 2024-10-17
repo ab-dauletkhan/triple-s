@@ -1,1 +1,2 @@
-BucketName,Status,CreatedAt,ModifiedAt
+Name,Status,CreationDate,LastUpdated
+abc,Active,2024-10-17T22:47:06.419043+05:00,2024-10-17T22:47:06.419059+05:00

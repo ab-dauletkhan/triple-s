@@ -22,6 +22,7 @@ type Object struct {
 	Name          string   `xml:"Name"`
 	ContentType   string   `xml:"ContentType"`
 	ContentLength string   `xml:"ContentLength"`
+	LastModified  string   `xml:"LastModified"`
 }
 
 type Objects struct {
@@ -30,7 +31,7 @@ type Objects struct {
 }
 
 type Error struct {
-	Code    int    `xml:"Code"`
-	Message string `xml:"Message"`
-	// TODO: add resource field
+	Code     int    `xml:"Code"`
+	Message  string `xml:"Message"`
+	Resource string `xml:"Resource,omitempty"`
 }

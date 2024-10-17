@@ -1,6 +1,7 @@
 package core
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 )
@@ -9,6 +10,11 @@ var (
 	Port int
 	Dir  string
 	Help bool
+)
+
+var (
+	ErrIncorrectPort = errors.New("incorrect port number, range must be between 1-65535")
+	ErrEmptyDir      = errors.New("empty directory path")
 )
 
 // Parses the above three flags

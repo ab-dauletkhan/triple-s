@@ -1,12 +1,15 @@
 package handlers
 
 import (
+	"fmt"
 	"io"
 	"log"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/ab-dauletkhan/triple-s/api/core"
 )
@@ -26,6 +29,19 @@ func CreateObject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	objects, err := ReadObjectsFile(bucketName)
+	fmt.Println(objects)
+	if err != nil {
+		log.Printf("Failed to read objects file for bucket %s: %v\n", bucketName, err)
+		XMLErrResponse(w, http.StatusInternalServerError, ErrInternalServer.Error())
+		return
+	}
+
+	objectIndex := FindObjectIndex(objects.List, objectKey)
+	if objectIndex != -1 {
+		objects.List = RemoveObject(objects.List, objectIndex)
+	}
+
 	objectPath := filepath.Join(bucketPath, objectKey)
 	file, err := os.Create(objectPath)
 	if err != nil {
@@ -42,21 +58,47 @@ func CreateObject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	contentType := r.Header.Get("Content-Type")
-	if contentType == "" {
-		contentType = "application/octet-stream"
+	newObject := core.Object{
+		Name:          objectKey,
+		ContentType:   r.Header.Get("Content-Type"),
+		ContentLength: strconv.FormatInt(r.ContentLength, 10),
+		LastModified:  time.Now().Format(time.RFC3339Nano),
+	}
+	if newObject.ContentType == "" {
+		newObject.ContentType = "application/octet-stream"
 	}
 
-	err = UpdateMetadata(bucketPath, objectKey, contentType)
+	objects.List = append(objects.List, newObject)
+	fmt.Println(objects)
+	err = WriteObjectsFile(bucketName, objects)
 	if err != nil {
-		log.Printf("Failed to update metadata for %s in bucket %s: %v\n", objectKey, bucketName, err)
-		XMLErrResponse(w, http.StatusInternalServerError, "Failed to update metadata")
+		log.Printf("Failed to update objects file for bucket %s: %v\n", bucketName, err)
+		XMLErrResponse(w, http.StatusInternalServerError, ErrInternalServer.Error())
 		return
 	}
 
 	log.Printf("Object %s created successfully in bucket %s\n", objectKey, bucketName)
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte("Object created successfully"))
+}
+
+func ListObjects(w http.ResponseWriter, r *http.Request) {
+	bucketName := strings.TrimPrefix(r.URL.Path, "/")
+
+	objectsData, err := ReadObjectsFile(bucketName)
+	if err != nil {
+		if os.IsNotExist(err) {
+			log.Printf("Bucket not found: %s\n", bucketName)
+			XMLErrResponse(w, http.StatusNotFound, "Bucket not found")
+		} else {
+			log.Printf("Error reading objects file for bucket %s: %v\n", bucketName, err)
+			XMLErrResponse(w, http.StatusInternalServerError, "Internal server error")
+		}
+		return
+	}
+
+	log.Printf("Objects listed successfully for bucket %s\n", bucketName)
+	XMLResponse(w, http.StatusOK, objectsData)
 }
 
 func GetObject(w http.ResponseWriter, r *http.Request) {
@@ -123,39 +165,35 @@ func DeleteObject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err := os.Remove(objectPath)
+	objects, err := ReadObjectsFile(bucketName)
+	if err != nil {
+		log.Printf("Failed to read objects file for bucket %s: %v\n", bucketName, err)
+		XMLErrResponse(w, http.StatusInternalServerError, ErrInternalServer.Error())
+		return
+	}
+
+	objectIndex := FindObjectIndex(objects.List, objectKey)
+	if objectIndex == -1 {
+		log.Printf("Object %s not found in bucket %s\n", objectKey, bucketName)
+		XMLErrResponse(w, http.StatusNotFound, "Object not found")
+		return
+	}
+
+	objects.List = RemoveObject(objects.List, objectIndex)
+	err = WriteObjectsFile(bucketName, objects)
+	if err != nil {
+		log.Printf("Failed to update objects file for bucket %s: %v\n", bucketName, err)
+		XMLErrResponse(w, http.StatusInternalServerError, ErrInternalServer.Error())
+		return
+	}
+
+	err = os.Remove(objectPath)
 	if err != nil {
 		log.Printf("Failed to delete object %s in bucket %s: %v\n", objectKey, bucketName, err)
 		XMLErrResponse(w, http.StatusInternalServerError, "Failed to delete object")
 		return
 	}
 
-	err = RemoveMetadata(bucketPath, objectKey)
-	if err != nil {
-		log.Printf("Failed to update metadata after deleting %s in bucket %s: %v\n", objectKey, bucketName, err)
-		XMLErrResponse(w, http.StatusInternalServerError, "Failed to update metadata")
-		return
-	}
-
 	log.Printf("Object %s deleted successfully from bucket %s\n", objectKey, bucketName)
 	w.WriteHeader(http.StatusNoContent)
-}
-
-func ListObjects(w http.ResponseWriter, r *http.Request) {
-	bucketName := strings.TrimPrefix(r.URL.Path, "/")
-
-	objectsData, err := ReadObjectsFile(bucketName)
-	if err != nil {
-		if os.IsNotExist(err) {
-			log.Printf("Bucket not found: %s\n", bucketName)
-			XMLErrResponse(w, http.StatusNotFound, "Bucket not found")
-		} else {
-			log.Printf("Error reading objects file for bucket %s: %v\n", bucketName, err)
-			XMLErrResponse(w, http.StatusInternalServerError, "Error reading objects file")
-		}
-		return
-	}
-
-	log.Printf("Objects listed successfully for bucket %s\n", bucketName)
-	XMLResponse(w, http.StatusOK, objectsData)
 }

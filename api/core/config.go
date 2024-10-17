@@ -10,5 +10,5 @@ const (
 
 var (
 	BucketsCSVHeader = []string{"Name", "Status", "CreationDate", "LastUpdated"}
-	ObjectsCSVHeader = []string{"ObjectKey", "ContentType", "ContentLength"}
+	ObjectsCSVHeader = []string{"ObjectKey", "ContentType", "ContentLength", "LastModified"}
 )

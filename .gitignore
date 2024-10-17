@@ -24,6 +24,7 @@ go.work.sum
 # env file
 .env
 
-./s3
-./triple-s
+s3
+triple-s
 ./data
+./assets
