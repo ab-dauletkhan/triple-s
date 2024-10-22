@@ -13,13 +13,17 @@ import (
 func Run() {
 	// Parses the port, dir and help flags.
 	// If, help provided prints help message immediately and program stops there
-	core.ParseFlags()
+	err := core.ParseFlags()
+	if err != nil {
+		log.Fatal(err)
+	}
+
 	if core.Help {
 		core.PrintUsage()
 		return
 	}
 
-	err := util.InitDir()
+	err = util.InitDir()
 	if err != nil {
 		log.Fatal(err)
 	}

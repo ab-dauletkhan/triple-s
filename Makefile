@@ -5,4 +5,4 @@ run:
 	go run .
 build:
 	gofumpt -l -w .
-	go build -o s3 .
+	go build -o triple-s .
